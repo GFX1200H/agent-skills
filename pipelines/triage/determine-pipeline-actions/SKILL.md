@@ -102,9 +102,13 @@ For each candidate:
 	default branch and its HEAD SHA.
 7. Find the newest pipeline whose `ref` and `sha` exactly match the selected tag
 	and its dereferenced commit SHA.
-8. For each selected pipeline, retrieve pipeline details. Retrieve jobs only
-	when that pipeline failed and request failed jobs only. Record failed job
-	names. Do not download job traces in this skill.
+8. For each selected pipeline, retrieve pipeline details. When an exact-SHA
+	default-branch pipeline passed, inspect only its `review`-stage jobs for a
+	cDSO downstream-pipeline URL. Read the minimum trace needed to parse that
+	URL, then inspect the downstream pipeline's failed, recognized security jobs
+	(e.g. Syft/Grype, Semgrep, TruffleHog, or ZAP), even when its overall status
+	is `success` because a job is allowed to fail. Record job metadata only; do
+	not copy scanner findings into classifier output.
 9. Compare the branch and tag SHAs and pipeline states, then assign exactly one
 	action using the classification rules below.
 
@@ -168,18 +172,20 @@ Apply these rules in order:
 1. If the default-branch pipeline is `failed`, use `repair_default_branch`
 	regardless of whether a latest tag exists. The repair skill uses
 	`em/pipeline_fix` when no tag exists.
-2. If the default-branch pipeline is not `passed`, use `wait_or_investigate`.
-3. If no tag exists, use `release_review_no_tag`.
-4. If the tag pipeline is `in_progress` or `inconclusive`, use
+2. If the default-branch pipeline passed and its downstream security review
+	has recognized failed security jobs, use `repair_downstream_security_findings`.
+3. If the default-branch pipeline is not `passed`, use `wait_or_investigate`.
+4. If no tag exists, use `release_review_no_tag`.
+5. If the tag pipeline is `in_progress` or `inconclusive`, use
 	`wait_or_investigate`.
-5. If both pipelines passed and the tag SHA equals default-branch HEAD, use
+6. If both pipelines passed and the tag SHA equals default-branch HEAD, use
 	`no_action`.
-6. If both pipelines passed but the SHAs differ, use `release_review_tag_behind`.
-7. If the default branch passed, the tag failed, and both refs resolve to the
+7. If both pipelines passed but the SHAs differ, use `release_review_tag_behind`.
+8. If the default branch passed, the tag failed, and both refs resolve to the
 	same SHA, use `investigate_tag_context`.
-8. If the default branch passed, the tag failed, and the SHAs differ, use
+9. If the default branch passed, the tag failed, and the SHAs differ, use
 	`release_review_tag_failed`.
-9. For any unhandled combination, use `wait_or_investigate` and add a warning.
+10. For any unhandled combination, use `wait_or_investigate` and add a warning.
 
 These classifications are recommendations only. Do not create or move tags,
 retry pipelines, or begin repairs. A later repair skill may consume repositories
@@ -196,7 +202,7 @@ Use this structure:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "triaged_at": "<UTC ISO-8601 timestamp>",
   "repositories": [
 	 {
@@ -232,6 +238,13 @@ Use this structure:
 		  "tag_pipeline_state": "inconclusive"
 		},
 		"action": "wait_or_investigate",
+	"security_review": {
+	  "status": "clean",
+	  "parent_job": null,
+	  "downstream_pipeline": null,
+	  "failed_security_jobs": [],
+	  "warnings": []
+	},
 		"warnings": [],
 		"status": "ok"
 	 }
@@ -249,7 +262,8 @@ Use `null` for a missing pipeline or tag. When `latest_tag` is `null`, set
 Preserve each candidate's `umpire_issue_url` for traceability. Sort repositories
 by `repository_url`.
 
-`status` is `ok` for a complete repository snapshot and `error` when that
+`security_review` contains only pipeline and job metadata. Trace contents,
+scanner findings, and sensitive values must never be emitted. `status` is `ok` for a complete repository snapshot and `error` when that
 repository could not be classified after retries. Error entries include a
 redacted `error` object and must never be considered repairable. The additive
 `input` object provides provenance without changing schema version 1.
