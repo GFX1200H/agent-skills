@@ -89,7 +89,7 @@ completion. Do not replace the helper with ad hoc `glab` calls.
 
 After it exits successfully, validate the produced file:
 
-1. It is readable JSON and `schema_version` is exactly `1`.
+1. It is readable JSON and `schema_version` is exactly `2`.
 2. `triaged_at` is a parseable UTC ISO-8601 timestamp generated after the
 	 classifier stage began and after the collector's `collected_at` value.
 3. The output changed from its recorded pre-run state.
@@ -99,7 +99,7 @@ After it exits successfully, validate the produced file:
 	 fresh collector candidates. Reject missing, extra, or duplicate entries.
 6. When the additive `input.sha256` provenance is present, it exactly matches
 	the SHA-256 of the fresh collector file bytes. A mismatch stops the run.
-7. Every action is one documented by `determine-pipeline-actions`.
+7. Every action, including `repair_downstream_security_findings`, is one documented by `determine-pipeline-actions`; downstream security-review metadata must contain only validated pipeline/job identifiers and redacted warnings.
 8. Pipeline states, branch data, tag data, and warnings satisfy that skill's
 	 output contract.
 
@@ -130,6 +130,10 @@ Group or summarize the rows using these operator-facing categories:
 	exact-SHA failed default-branch pipeline with an ID and URL is present. A
 	latest tag is optional: tagged repositories use `em/<latest-tag>` and
 	untagged repositories use `em/pipeline_fix`.
+- **Repairable security finding**: repository `status` is absent or `ok`,
+	action is `repair_downstream_security_findings`, the exact-SHA default-branch
+	pipeline and parsed cDSO downstream pipeline are present, and at least one
+	recognized failed security job has an ID and URL. Show job names only.
 - **Blocked repair**: action is `repair_default_branch`, but required branch or
 	pipeline input is absent.
 - **Classification error**: repository `status` is `error`. Show its redacted
@@ -146,13 +150,13 @@ operator-facing eligibility category is an additional guard on whether
 `triage-pipeline` has all required input.
 
 Include all collector and classifier warnings without exposing sensitive data.
-State clearly that only entries under **Repairable now** can be selected in
+State clearly that only entries under **Repairable now** or **Repairable security finding** can be selected in
 this run. Do not repair release-review, wait/investigate, no-action, or blocked
 entries through this orchestrator.
 
 ## Approval gate
 
-Stop and ask the user to approve exactly one **Repairable now** repository by
+Stop and ask the user to approve exactly one eligible repository by
 its full repository URL or an unambiguous displayed identifier. Approval must
 occur after the classification report; approval from an earlier message does
 not cross this gate unless it explicitly identifies one repository and was
@@ -172,7 +176,7 @@ Do not offer a default or choose the first, easiest, or highest-priority entry.
 
 ## Stage 4: repair one approved repository
 
-Load and follow `triage-pipeline` for the approved classifier entry. Supply the
+Load and follow `triage-pipeline` for the approved classifier entry and repair reason. Supply the
 repository explicitly; do not let the repair skill infer a selection from a
 multi-entry file.
 
