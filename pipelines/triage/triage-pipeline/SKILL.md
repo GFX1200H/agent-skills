@@ -1,6 +1,6 @@
 ---
 name: triage-pipeline
-description: Investigate a failed default-branch GitLab pipeline, create or reuse a local em/<latest-tag> or em/pipeline_fix repair branch, and make evidence-based local fixes without committing or pushing. Use after determine-pipeline-actions classifies an approved repository for repair, including Syft/Grype, Semgrep, TruffleHog, or OWASP ZAP failures.
+description: Investigate a failed default-branch GitLab pipeline, create or reuse a local em/tag-name or em/pipeline_fix repair branch, and make evidence-based local fixes without committing or pushing. Use after determine-pipeline-actions classifies an approved repository for repair, including Syft/Grype, Semgrep, TruffleHog, or OWASP ZAP failures.
 ---
 
 # Triage and Repair a Pipeline Locally
@@ -21,7 +21,7 @@ entry in:
 
 `~/.local/state/pipeline-repair/pipeline-actions.json`
 
-By default, read that file and require `schema_version` 1. Do not select a
+By default, read that file and require `schema_version` 2. Do not select a
 repository implicitly when the file contains multiple entries.
 
 The selected entry must provide:
@@ -36,8 +36,12 @@ Reject entries whose additive `status` field is `error`; they are incomplete
 classifier results and cannot authorize repair. When classifier input
 provenance is present, report its SHA-256 and retain it in the repair notes.
 
-Normally require `action: repair_default_branch`. If the action differs, explain
-the mismatch and obtain explicit user confirmation before proceeding. A missing
+Require either `action: repair_default_branch` or
+`action: repair_downstream_security_findings`. The latter additionally requires
+the classifier's parent job, downstream pipeline, and failed security-job
+metadata. Re-verify those identifiers live even if the downstream pipeline
+overall passed. Any other action requires explicit user confirmation before
+proceeding. A missing
 tag is not a blocker for a failed default branch; it selects the fixed fallback
 branch name `em/pipeline_fix`.
 
@@ -63,8 +67,11 @@ to exempt.
 3. Query the project and default branch through the read-only GitLab API.
 4. Verify the live default-branch name and HEAD SHA exactly match the triage
 	entry. If either changed, stop and rerun `determine-pipeline-actions`.
-5. Verify the selected pipeline belongs to that branch and SHA and remains
-	failed. If it no longer does, stop and report the new state.
+5. For `repair_default_branch`, verify the selected pipeline belongs to that
+	branch and SHA and remains failed. For downstream-security repair, verify the
+	passed parent pipeline, its review trigger job, parsed cDSO child pipeline,
+	and the recorded failed security jobs. If any identity or state differs, stop
+	and rerun classification.
 6. If the triage entry contains a latest tag, verify that tag still exists. If
 	tag selection may have changed, stop and rerun `determine-pipeline-actions`
 	rather than choosing a tag here. If the entry has no tag, verify the project
@@ -201,6 +208,20 @@ Before editing any target file:
 Do not claim that a local check proves the remote pipeline will pass. Record any
 job that cannot be reproduced locally.
 
+### Approved base-image lookup
+
+When a container-scanner failure is attributable to an approved base image,
+prefer read-only registry metadata from the [approved-base container
+registry](https://code.cdso.army.mil/cdso/containers/approved-base/container_registry)
+to discover candidate promoted images and tags. Do not scrape its HTML.
+
+If GitLab API or registry access is denied or unavailable, record that
+limitation and use readable source-project release metadata and/or a locally
+cached, pullable image for diagnosis. A source-project tag alone does not prove
+that the corresponding promoted image tag is available; validate a chosen tag
+with a focused local build when practical. Do not treat inaccessible registry
+metadata as evidence that an image or tag is absent.
+
 ## Exemption policy
 
 An exemption is not a generic way to make a pipeline pass. Never invent a
@@ -227,6 +248,15 @@ report but do not add it.
 Prefer upgrading, removing, or rebuilding the vulnerable package. Use the raw
 scanner report to identify unmitigated findings and confirm the affected package
 and installed/fixed versions.
+
+When a verified Syft/Grype finding still requires a manual mitigation, read
+`references/syft_grype.md` before drafting it. Add an entry to
+`cdso_config.yml` only for the exact reported CVE/GHSA under the application key
+selected by the pipeline `NAME`, and only when the report plus repository or
+deployment evidence establishes a concrete compensating control. State both the
+current limitation and the condition that requires reassessment (for example, an
+upstream fixed package becoming available). A CVE list, severity, or EPSS score
+alone is not sufficient evidence for a mitigation.
 
 Only add a `cdso_config.yml` mitigation when evidence supports a false positive
 or concrete compensating control. Put it under the application key selected by
